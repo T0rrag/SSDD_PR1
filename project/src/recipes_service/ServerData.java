@@ -145,22 +145,46 @@ public class ServerData {
 		Recipe rcpe = new Recipe(recipeTitle, recipe, id, timestamp);
 		Operation op=new AddOperation(rcpe, timestamp);
 
-		this.log.add(op);
-		this.summary.updateTimestamp(timestamp);
-		this.recipes.add(rcpe);
+                if (!this.log.add(op)){
+                        return;
+                }
+                this.summary.updateTimestamp(timestamp);
+                refreshLocalAck();
+                this.recipes.add(rcpe);
 //		LSimLogger.log(Level.TRACE,"The recipe '"+recipeTitle+"' has been added");
 
 	}
 	
-	public synchronized void removeRecipe(String recipeTitle){
-		System.err.println("Error: removeRecipe method (recipesService.serverData) not yet implemented");
-	}
+        public synchronized void removeRecipe(String recipeTitle){
+                Timestamp timestamp = nextTimestamp();
+                Recipe recipe = this.recipes.get(recipeTitle);
+                Timestamp recipeTimestamp = (recipe != null) ? recipe.getTimestamp() : null;
+                Operation op = new RemoveOperation(recipeTitle, recipeTimestamp, timestamp);
+
+                if (!this.log.add(op)){
+                        return;
+                }
+
+                this.summary.updateTimestamp(timestamp);
+                refreshLocalAck();
+
+                if (recipe != null){
+                        this.recipes.remove(recipeTitle);
+                }
+
+                if (recipeTimestamp != null && !tombstones.contains(recipeTimestamp)){
+                        tombstones.add(recipeTimestamp);
+                }
+        }
 	
 	private synchronized void purgeTombstones(){
 		if (ack == null){
 			return;
 		}
-		TimestampVector sum = ack.minTimestampVector();
+                TimestampVector sum = ack.minTimestampVector();
+                if (sum == null){
+                        return;
+                }
 		
 		List<Timestamp> newTombstones = new Vector<Timestamp>();
 		for(int i=0; i<tombstones.size(); i++){
@@ -180,12 +204,70 @@ public class ServerData {
 	public TimestampVector getSummary() {
 		return summary;
 	}
-	public TimestampMatrix getAck() {
-		return ack;
-	}
-	public Recipes getRecipes(){
-		return recipes;
-	}
+        public TimestampMatrix getAck() {
+                return ack;
+        }
+        public Recipes getRecipes(){
+                return recipes;
+        }
+
+        public TimestampVector getSummaryClone(){
+                if (summary == null){
+                        return null;
+                }
+                return summary.clone();
+        }
+
+        public TimestampMatrix getAckClone(){
+                if (ack == null){
+                        return null;
+                }
+                return ack.clone();
+        }
+
+        public List<Operation> getLogOperationsNewerThan(TimestampVector otherSummary){
+                if (log == null){
+                        return new Vector<Operation>();
+                }
+                return log.listNewer(otherSummary);
+        }
+
+        public void mergeAckMatrix(TimestampMatrix remoteAck){
+                if (ack == null || remoteAck == null){
+                        return;
+                }
+                ack.updateMax(remoteAck);
+                refreshLocalAck();
+                purgeLogWithAck();
+                purgeTombstones();
+        }
+
+        public void registerOperation(Operation op){
+                if (op == null || log == null){
+                        return;
+                }
+
+                if (!log.add(op)){
+                        return;
+                }
+
+                if (op.getType() == OperationType.ADD){
+                        AddOperation add = (AddOperation) op;
+                        recipes.add(add.getRecipe());
+                        tombstones.remove(add.getRecipe().getTimestamp());
+                }else if (op.getType() == OperationType.REMOVE){
+                        RemoveOperation remove = (RemoveOperation) op;
+                        recipes.remove(remove.getRecipeTitle());
+                        Timestamp removed = remove.getRecipeTimestamp();
+                        if (removed != null && !tombstones.contains(removed)){
+                                tombstones.add(removed);
+                        }
+                }
+
+                summary.updateTimestamp(op.getTimestamp());
+                refreshLocalAck();
+                purgeLogWithAck();
+        }
 
 	// ******************************
 	// *** getters and setters
@@ -227,13 +309,31 @@ public class ServerData {
 	// *** other
 	// ******************************
 	
-	public List<Host> getRandomPartners(int num){
-		return participants.getRandomPartners(num);
-	}
-	
-	/**
-	 * waits until the Server is ready to receive TSAE sessions from partner servers   
-	 */
+        public List<Host> getRandomPartners(int num){
+                return participants.getRandomPartners(num);
+        }
+
+        public String getLocalId(){
+                return id;
+        }
+
+        private void refreshLocalAck(){
+                if (ack == null || summary == null || id == null){
+                        return;
+                }
+                ack.update(id, summary.clone());
+        }
+
+        private void purgeLogWithAck(){
+                if (log == null || ack == null){
+                        return;
+                }
+                log.purgeLog(ack);
+        }
+
+        /**
+         * waits until the Server is ready to receive TSAE sessions from partner servers
+         */
 	public synchronized void waitServerConnected(){
 		while (!SimulationData.getInstance().isConnected()){
 			try {

@@ -23,11 +23,11 @@ package recipes_service.tsae.data_structures;
 
 
 import java.io.Serializable;
-import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Vector;
 
 import edu.uoc.dpcs.lsim.logger.LoggerManager.Level;
 import lsim.library.api.LSimLogger;
@@ -49,33 +49,68 @@ public class TimestampVector implements Serializable{
 	 * For each node, stores the timestamp of the last received operation.
 	 */
 	
-	private ConcurrentHashMap<String, Timestamp> timestampVector= new ConcurrentHashMap<String, Timestamp>();
-	
-	public TimestampVector (List<String> participants){
-		// create and empty TimestampVector
-		for (Iterator<String> it = participants.iterator(); it.hasNext(); ){
-			String id = it.next();
-			// when sequence number of timestamp < 0 it means that the timestamp is the null timestamp
-			timestampVector.put(id, new Timestamp(id, Timestamp.NULL_TIMESTAMP_SEQ_NUMBER));
-		}
-	}
+        private ConcurrentHashMap<String, Timestamp> timestampVector= new ConcurrentHashMap<String, Timestamp>();
+        private final List<String> participants;
+
+        public TimestampVector (List<String> participants){
+                // create and empty TimestampVector
+                this.participants = new Vector<String>();
+                for (Iterator<String> it = participants.iterator(); it.hasNext(); ){
+                        String id = it.next();
+                        this.participants.add(id);
+                        // when sequence number of timestamp < 0 it means that the timestamp is the null timestamp
+                        timestampVector.put(id, new Timestamp(id, Timestamp.NULL_TIMESTAMP_SEQ_NUMBER));
+                }
+        }
 
 	/**
 	 * Updates the timestamp vector with a new timestamp. 
 	 * @param timestamp
 	 */
-	public void updateTimestamp(Timestamp timestamp){
-		LSimLogger.log(Level.TRACE, "Updating the TimestampVectorInserting with the timestamp: "+timestamp);
+        public synchronized void updateTimestamp(Timestamp timestamp){
+                LSimLogger.log(Level.TRACE, "Updating the TimestampVectorInserting with the timestamp: "+timestamp);
 
-		// ...
-	}
+                if (timestamp == null || timestamp.getHostid() == null){
+                        return;
+                }
+
+                if (!timestampVector.containsKey(timestamp.getHostid())){
+                        if (!participants.contains(timestamp.getHostid())){
+                                participants.add(timestamp.getHostid());
+                        }
+                }
+
+                Timestamp current = timestampVector.get(timestamp.getHostid());
+                if (current == null || timestamp.compare(current) > 0){
+                        timestampVector.put(timestamp.getHostid(), timestamp);
+                }
+        }
 	
 	/**
 	 * merge in another vector, taking the elementwise maximum
 	 * @param tsVector (a timestamp vector)
 	 */
-	public void updateMax(TimestampVector tsVector){
-	}
+        public synchronized void updateMax(TimestampVector tsVector){
+                if (tsVector == null){
+                        return;
+                }
+
+                for (String id : tsVector.timestampVector.keySet()){
+                        Timestamp other = tsVector.timestampVector.get(id);
+                        if (other == null){
+                                continue;
+                        }
+                        if (!timestampVector.containsKey(id)){
+                                if (!participants.contains(id)){
+                                        participants.add(id);
+                                }
+                        }
+                        Timestamp current = timestampVector.get(id);
+                        if (current == null || other.compare(current) > 0){
+                                timestampVector.put(id, other);
+                        }
+                }
+        }
 	
 	/**
 	 * 
@@ -83,11 +118,12 @@ public class TimestampVector implements Serializable{
 	 * @return the last timestamp issued by node that has been
 	 * received.
 	 */
-	public Timestamp getLast(String node){
-		
-		// return generated automatically. Remove it when implementing your solution 
-		return null;
-	}
+        public synchronized Timestamp getLast(String node){
+                if (node == null){
+                        return null;
+                }
+                return timestampVector.get(node);
+        }
 	
 	/**
 	 * merges local timestamp vector with tsVector timestamp vector taking
@@ -95,26 +131,67 @@ public class TimestampVector implements Serializable{
 	 * After merging, local node will have the smallest timestamp for each node.
 	 *  @param tsVector (timestamp vector)
 	 */
-	public void mergeMin(TimestampVector tsVector){
-	}
+        public synchronized void mergeMin(TimestampVector tsVector){
+                if (tsVector == null){
+                        return;
+                }
+
+                for (String id : new Vector<String>(participants)){
+                        Timestamp other = tsVector.getLast(id);
+                        if (other == null){
+                                continue;
+                        }
+                        Timestamp current = timestampVector.get(id);
+                        if (current == null || current.compare(other) > 0){
+                                timestampVector.put(id, other);
+                        }
+                }
+
+                for (String id : tsVector.timestampVector.keySet()){
+                        if (!timestampVector.containsKey(id)){
+                                if (!participants.contains(id)){
+                                        participants.add(id);
+                                }
+                                Timestamp other = tsVector.timestampVector.get(id);
+                                if (other != null){
+                                        timestampVector.put(id, other);
+                                }
+                        }
+                }
+        }
 	
 	/**
 	 * clone
 	 */
-	public TimestampVector clone(){
-		
-		// return generated automatically. Remove it when implementing your solution 
-		return null;
-	}
+        public synchronized TimestampVector clone(){
+                TimestampVector clone = new TimestampVector(new Vector<String>(participants));
+
+                for (String id : participants){
+                        clone.timestampVector.put(id, timestampVector.get(id));
+                }
+
+                return clone;
+        }
 	
 	/**
 	 * equals
 	 */
-	public boolean equals(Object obj){
-		
-		// return generated automatically. Remove it when implementing your solution 
-		return false;
-	}
+        public synchronized boolean equals(Object obj){
+
+                if (this == obj)
+                        return true;
+                if (obj == null)
+                        return false;
+                if (getClass() != obj.getClass())
+                        return false;
+                TimestampVector other = (TimestampVector) obj;
+                return timestampVector.equals(other.timestampVector);
+        }
+
+        @Override
+        public synchronized int hashCode() {
+                return timestampVector.hashCode();
+        }
 
 	/**
 	 * toString
