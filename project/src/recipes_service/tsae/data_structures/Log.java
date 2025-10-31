@@ -29,6 +29,7 @@ import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 
 import recipes_service.data.Operation;
+import recipes_service.data.OperationType;
 //LSim logging system imports sgeag@2017
 //import lsim.coordinator.LSimCoordinator;
 import edu.uoc.dpcs.lsim.logger.LoggerManager.Level;
@@ -53,14 +54,17 @@ public class Log implements Serializable{
 	 * that stores a list of operations for each member of 
 	 * the group.
 	 */
-	private ConcurrentHashMap<String, List<Operation>> log= new ConcurrentHashMap<String, List<Operation>>();  
+        private ConcurrentHashMap<String, List<Operation>> log= new ConcurrentHashMap<String, List<Operation>>();
+        private final List<String> participants = new Vector<String>();
 
-	public Log(List<String> participants){
-		// create an empty log
-		for (Iterator<String> it = participants.iterator(); it.hasNext(); ){
-			log.put(it.next(), new Vector<Operation>());
-		}
-	}
+        public Log(List<String> participants){
+                // create an empty log
+                for (Iterator<String> it = participants.iterator(); it.hasNext(); ){
+                        String id = it.next();
+                        this.participants.add(id);
+                        log.put(id, new Vector<Operation>());
+                }
+        }
 
 	/**
 	 * inserts an operation into the log. Operations are 
@@ -71,12 +75,43 @@ public class Log implements Serializable{
 	 * @param op
 	 * @return true if op is inserted, false otherwise.
 	 */
-	public boolean add(Operation op){
-		// ....
-		
-		// return generated automatically. Remove it when implementing your solution 
-		return false;
-	}
+        public synchronized boolean add(Operation op){
+                if (op == null || op.getType() != OperationType.ADD){
+                        return false;
+                }
+                if (op.getTimestamp() == null || op.getTimestamp().getHostid() == null){
+                        return false;
+                }
+
+                String hostId = op.getTimestamp().getHostid();
+                List<Operation> sublog = log.get(hostId);
+                if (sublog == null){
+                        sublog = new Vector<Operation>();
+                        log.put(hostId, sublog);
+                        if (!participants.contains(hostId)){
+                                participants.add(hostId);
+                        }
+                }
+
+                if (sublog.isEmpty()){
+                        sublog.add(op);
+                        return true;
+                }
+
+                Operation lastOp = sublog.get(sublog.size() - 1);
+                if (lastOp == null || lastOp.getTimestamp() == null){
+                        return false;
+                }
+
+                long diff = op.getTimestamp().compare(lastOp.getTimestamp());
+                if (diff == 1){
+                        sublog.add(op);
+                        return true;
+                }
+
+                // duplicated or out-of-order operation
+                return false;
+        }
 	
 	/**
 	 * Checks the received summary (sum) and determines the operations
@@ -86,11 +121,29 @@ public class Log implements Serializable{
 	 * @param sum
 	 * @return list of operations
 	 */
-	public List<Operation> listNewer(TimestampVector sum){
+        public synchronized List<Operation> listNewer(TimestampVector sum){
+                List<Operation> operations = new Vector<Operation>();
 
-		// return generated automatically. Remove it when implementing your solution 
-		return null;
-	}
+                for (String hostId : participants){
+                        List<Operation> sublog = log.get(hostId);
+                        if (sublog == null){
+                                continue;
+                        }
+
+                        Timestamp lastSeen = null;
+                        if (sum != null){
+                                lastSeen = sum.getLast(hostId);
+                        }
+
+                        for (Operation operation : sublog){
+                                if (lastSeen == null || operation.getTimestamp().compare(lastSeen) > 0){
+                                        operations.add(operation);
+                                }
+                        }
+                }
+
+                return operations;
+        }
 	
 	/**
 	 * Removes from the log the operations that have
@@ -99,18 +152,29 @@ public class Log implements Serializable{
 	 * ackSummary. 
 	 * @param ack: ackSummary.
 	 */
-	public void purgeLog(TimestampMatrix ack){
-	}
+        public synchronized void purgeLog(TimestampMatrix ack){
+        }
 
 	/**
 	 * equals
 	 */
 	@Override
-	public boolean equals(Object obj) {
-		
-		// return generated automatically. Remove it when implementing your solution 
-		return false;
-	}
+        public synchronized boolean equals(Object obj) {
+
+                if (this == obj)
+                        return true;
+                if (obj == null)
+                        return false;
+                if (getClass() != obj.getClass())
+                        return false;
+                Log other = (Log) obj;
+                return log.equals(other.log);
+        }
+
+        @Override
+        public synchronized int hashCode() {
+                return log.hashCode();
+        }
 
 	/**
 	 * toString

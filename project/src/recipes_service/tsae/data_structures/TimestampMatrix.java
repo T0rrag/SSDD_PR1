@@ -21,11 +21,11 @@
 package recipes_service.tsae.data_structures;
 
 import java.io.Serializable;
-import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Vector;
 
 import edu.uoc.dpcs.lsim.logger.LoggerManager.Level;
 
@@ -37,69 +37,136 @@ import edu.uoc.dpcs.lsim.logger.LoggerManager.Level;
 public class TimestampMatrix implements Serializable{
 	
 	private static final long serialVersionUID = 3331148113387926667L;
-	ConcurrentHashMap<String, TimestampVector> timestampMatrix = new ConcurrentHashMap<String, TimestampVector>();
-	
-	public TimestampMatrix(List<String> participants){
-		// create and empty TimestampMatrix
-		for (Iterator<String> it = participants.iterator(); it.hasNext(); ){
-			timestampMatrix.put(it.next(), new TimestampVector(participants));
-		}
-	}
+        ConcurrentHashMap<String, TimestampVector> timestampMatrix = new ConcurrentHashMap<String, TimestampVector>();
+        private final List<String> participants;
+
+        public TimestampMatrix(List<String> participants){
+                // create and empty TimestampMatrix
+                this.participants = new Vector<String>();
+                for (Iterator<String> it = participants.iterator(); it.hasNext(); ){
+                        String id = it.next();
+                        this.participants.add(id);
+                        timestampMatrix.put(id, new TimestampVector(participants));
+                }
+        }
 	
 	/**
 	 * @param node
 	 * @return the timestamp vector of node in this timestamp matrix
 	 */
-	TimestampVector getTimestampVector(String node){
-		
-		// return generated automatically. Remove it when implementing your solution 
-		return null;
-	}
+        synchronized TimestampVector getTimestampVector(String node){
+                if (node == null){
+                        return null;
+                }
+                return timestampMatrix.get(node);
+        }
 	
 	/**
 	 * Merges two timestamp matrix taking the elementwise maximum
 	 * @param tsMatrix
 	 */
-	public void updateMax(TimestampMatrix tsMatrix){
-	}
+        public synchronized void updateMax(TimestampMatrix tsMatrix){
+                if (tsMatrix == null){
+                        return;
+                }
+
+                for (String node : tsMatrix.timestampMatrix.keySet()){
+                        TimestampVector remoteVector = tsMatrix.timestampMatrix.get(node);
+                        if (remoteVector == null){
+                                continue;
+                        }
+                        TimestampVector localVector = timestampMatrix.get(node);
+                        if (localVector == null){
+                                if (!participants.contains(node)){
+                                        participants.add(node);
+                                }
+                                timestampMatrix.put(node, remoteVector.clone());
+                        } else {
+                                localVector.updateMax(remoteVector);
+                        }
+                }
+        }
 	
 	/**
 	 * substitutes current timestamp vector of node for tsVector
 	 * @param node
 	 * @param tsVector
 	 */
-	public void update(String node, TimestampVector tsVector){
-	}
+        public synchronized void update(String node, TimestampVector tsVector){
+                if (node == null){
+                        return;
+                }
+
+                if (tsVector == null){
+                        timestampMatrix.remove(node);
+                        participants.remove(node);
+                } else {
+                        if (!participants.contains(node)){
+                                participants.add(node);
+                        }
+                        timestampMatrix.put(node, tsVector.clone());
+                }
+        }
 	
 	/**
 	 * 
 	 * @return a timestamp vector containing, for each node, 
 	 * the timestamp known by all participants
 	 */
-	public TimestampVector minTimestampVector(){
+        public synchronized TimestampVector minTimestampVector(){
+                TimestampVector result = null;
 
-		// return generated automatically. Remove it when implementing your solution 
-		return null;
-	}
+                for (String participant : participants){
+                        TimestampVector vector = timestampMatrix.get(participant);
+                        if (vector == null){
+                                continue;
+                        }
+                        if (result == null){
+                                result = vector.clone();
+                        } else {
+                                result.mergeMin(vector);
+                        }
+                }
+
+                return result;
+        }
 	
 	/**
 	 * clone
 	 */
-	public TimestampMatrix clone(){
+        public synchronized TimestampMatrix clone(){
+                TimestampMatrix clone = new TimestampMatrix(new Vector<String>(participants));
 
-		// return generated automatically. Remove it when implementing your solution 
-		return null;
-	}
+                for (String node : participants){
+                        TimestampVector vector = timestampMatrix.get(node);
+                        if (vector != null){
+                                clone.timestampMatrix.put(node, vector.clone());
+                        }
+                }
+
+                return clone;
+        }
 	
 	/**
 	 * equals
 	 */
 	@Override
-	public boolean equals(Object obj) {
+        public synchronized boolean equals(Object obj) {
 
-		// return generated automatically. Remove it when implementing your solution 
-		return false;
-	}
+                if (this == obj)
+                        return true;
+                if (obj == null)
+                        return false;
+                if (getClass() != obj.getClass())
+                        return false;
+                TimestampMatrix other = (TimestampMatrix) obj;
+                return timestampMatrix.equals(other.timestampMatrix);
+        }
+
+        @Override
+        public synchronized int hashCode() {
+                return timestampMatrix.hashCode();
+        }
 
 	
 	/**
